@@ -129,11 +129,57 @@ var store = {
   feeds: []
 };
 
+function applyApiMixins(targetClass, baseClasses) {}
+
+var Api =
+/** @class */
+function () {
+  function Api() {}
+
+  Api.prototype.getRequest = function (url) {
+    var ajax = new XMLHttpRequest();
+    ajax.open('GET', url, false);
+    ajax.send();
+    return JSON.parse(ajax.response);
+  };
+
+  return Api;
+}();
+
+var NewsFeedApi =
+/** @class */
+function () {
+  function NewsFeedApi() {}
+
+  NewsFeedApi.prototype.getData = function () {
+    return this.getRequest(NEWS_URL);
+  };
+
+  return NewsFeedApi;
+}();
+
+var NewsDetailApi =
+/** @class */
+function () {
+  function NewsDetailApi() {}
+
+  NewsDetailApi.prototype.getData = function (id) {
+    return this.getRequest(CONTENT_URL.replace('@id', id));
+  };
+
+  return NewsDetailApi;
+}();
+
 function getData(url) {
   ajax.open('GET', url, false);
   ajax.send();
   return JSON.parse(ajax.response);
 }
+
+;
+;
+applyApiMixins(NewsFeedApi, [Api]);
+applyApiMixins(NewsDetailApi, [Api]);
 
 function makeFeeds(feeds) {
   for (var i = 0; i < feeds.length; i++) {
@@ -143,13 +189,22 @@ function makeFeeds(feeds) {
   return feeds;
 }
 
+function updateView(html) {
+  if (container) {
+    container.innerHTML = html;
+  } else {
+    console.error('최상위 컨테이너가 없어 UI를 진행하지 못했습니다.');
+  }
+}
+
 function newsFeed() {
+  var api = new NewsFeedApi();
   var newsFeed = store.feeds;
   var newsList = [];
   var template = "\n    <div class=\"bg-gray-600 min-h-screen\">\n      <div class=\"bg-white text-xl\">\n        <div class=\"mx-auto px-4\">\n          <div class=\"flex justify-between items-center py-6\">\n            <div class=\"flex justify-start\">\n              <h1 class=\"font-extrabold\">Hacker News</h1>\n            </div>\n            <div class=\"items-center justify-end\">\n              <a href=\"#/page/{{__prev_page__}}\" class=\"text-gray-500\">\n                Previous\n              </a>\n              <a href=\"#/page/{{__next_page__}}\" class=\"text-gray-500 ml-4\">\n                Next\n              </a>\n            </div>\n          </div> \n        </div>\n      </div>\n      <div class=\"p-4 text-2xl text-gray-700\">\n        {{__news_feed__}}        \n      </div>\n    </div>\n  ";
 
   if (newsFeed.length === 0) {
-    newsFeed = store.feeds = makeFeeds(getData(NEWS_URL));
+    newsFeed = store.feeds = makeFeeds(api.getData());
   }
 
   for (var i = (store.currentPage - 1) * 10; i < store.currentPage * 10; i++) {
@@ -157,14 +212,15 @@ function newsFeed() {
   }
 
   template = template.replace('{{__news_feed__}}', newsList.join(''));
-  template = template.replace('{{__prev_page__}}', store.currentPage > 1 ? store.currentPage - 1 : 1);
-  template = template.replace('{{__next_page__}}', store.currentPage + 1);
-  container.innerHTML = template;
+  template = template.replace('{{__prev_page__}}', String(store.currentPage > 1 ? store.currentPage - 1 : 1));
+  template = template.replace('{{__next_page__}}', String(store.currentPage + 1));
+  updateView(template);
 }
 
 function newsDetail() {
   var id = location.hash.substr(7);
-  var newsContent = getData(CONTENT_URL.replace('@id', id));
+  var api = new NewsDetailApi();
+  var newsContent = api.getData(id);
   var template = "\n    <div class=\"bg-gray-600 min-h-screen pb-8\">\n      <div class=\"bg-white text-xl\">\n        <div class=\"mx-auto px-4\">\n          <div class=\"flex justify-between items-center py-6\">\n            <div class=\"flex justify-start\">\n              <h1 class=\"font-extrabold\">Hacker News</h1>\n            </div>\n            <div class=\"items-center justify-end\">\n              <a href=\"#/page/".concat(store.currentPage, "\" class=\"text-gray-500\">\n                <i class=\"fa fa-times\"></i>\n              </a>\n            </div>\n          </div>\n        </div>\n      </div>\n\n      <div class=\"h-full border rounded-xl bg-white m-6 p-4 \">\n        <h2>").concat(newsContent.title, "</h2>\n        <div class=\"text-gray-400 h-20\">\n          ").concat(newsContent.content, "\n        </div>\n\n        {{__comments__}}\n\n      </div>\n    </div>\n  ");
 
   for (var i = 0; i < store.feeds.length; i++) {
@@ -174,25 +230,22 @@ function newsDetail() {
     }
   }
 
-  function makeComment(comments, called) {
-    if (called === void 0) {
-      called = 0;
+  updateView(template.replace('{{__comments__}}', makeComment(newsContent.comments)));
+}
+
+function makeComment(comments) {
+  var commentString = [];
+
+  for (var i = 0; i < comments.length; i++) {
+    var comment = comments[i];
+    commentString.push("\n      <div style=\"padding-left: ".concat(comment.level * 40, "px;\" class=\"mt-4\">\n        <div class=\"text-gray-400\">\n          <i class=\"fa fa-sort-up mr-2\"></i>\n          <strong>").concat(comment.user, "</strong> ").concat(comment.time_ago, "\n        </div>\n        <p class=\"text-gray-700\">").concat(comment.content, "</p>\n      </div>      \n    "));
+
+    if (comments[i].comments.length > 0) {
+      commentString.push(makeComment(comments[i].comments));
     }
-
-    var commentString = [];
-
-    for (var i = 0; i < comments.length; i++) {
-      commentString.push("\n        <div style=\"padding-left: ".concat(called * 40, "px;\" class=\"mt-4\">\n          <div class=\"text-gray-400\">\n            <i class=\"fa fa-sort-up mr-2\"></i>\n            <strong>").concat(comments[i].user, "</strong> ").concat(comments[i].time_ago, "\n          </div>\n          <p class=\"text-gray-700\">").concat(comments[i].content, "</p>\n        </div>      \n      "));
-
-      if (comments[i].comments.length > 0) {
-        commentString.push(makeComment(comments[i].comments, called + 1));
-      }
-    }
-
-    return commentString.join('');
   }
 
-  container.innerHTML = template.replace('{{__comments__}}', makeComment(newsContent.comments));
+  return commentString.join('');
 }
 
 function router() {
@@ -210,7 +263,7 @@ function router() {
 
 window.addEventListener('hashchange', router);
 router();
-},{}],"../../../../../AppData/Roaming/npm/node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
+},{}],"../../../AppData/Roaming/npm/node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
 var global = arguments[3];
 var OVERLAY_ID = '__parcel__error__overlay__';
 var OldModule = module.bundle.Module;
@@ -238,7 +291,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "4992" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "6157" + '/');
 
   ws.onmessage = function (event) {
     checkedAssets = {};
@@ -414,5 +467,5 @@ function hmrAcceptRun(bundle, id) {
     return true;
   }
 }
-},{}]},{},["../../../../../AppData/Roaming/npm/node_modules/parcel-bundler/src/builtins/hmr-runtime.js","app.ts"], null)
+},{}]},{},["../../../AppData/Roaming/npm/node_modules/parcel-bundler/src/builtins/hmr-runtime.js","app.ts"], null)
 //# sourceMappingURL=/app.c61986b1.js.map
